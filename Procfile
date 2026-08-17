@@ -1,1 +1,1 @@
-web: gunicorn --timeout 120 --workers 2 ml_chatbot_api:app
+web: gunicorn --bind 0.0.0.0:$PORT --timeout 120 --workers 2 ml_chatbot_api:app
