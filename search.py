@@ -1,3 +1,6 @@
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
 def simple_search(query, top_k=3):
     """Search properties using simple text matching"""
     if vectorizer is None or property_vectors is None:

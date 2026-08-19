@@ -1,3 +1,5 @@
+import re
+
 def extract_preferences(msg):
     """Extract budget, bedrooms, city from message"""
     prefs = {'budget': None, 'bedrooms': None, 'city': None}
