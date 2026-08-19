@@ -1,5 +1,7 @@
-FROM python:3.11-slim
+# Dockerfile
+FROM python:3.9-slim
 
+# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -8,15 +10,20 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for caching
+# Copy requirements first (for better caching)
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy application code
 COPY . .
 
-# Expose port (Render uses 10000 by default, but your app uses 5000)
-EXPOSE 5000
+# Create directory for models
+RUN mkdir -p /app/models
 
-# Run the application
-CMD ["python", "ChatBot.py"]
+# Expose port
+EXPOSE 10000
+
+# Run the application with gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "ChatBot:app"]
