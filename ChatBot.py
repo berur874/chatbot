@@ -116,7 +116,7 @@ def chat():
         prediction = ml_model.predict(features)
         price = float(np.round(prediction * 100000, -3))
         
-        matches = simple_search(message, vectorizer, property_vectors)
+        matches = simple_search(message, vectorizer, property_vectors, top_k=3)
         
         # Format response
         response = f"🔍 Found {len(matches)} properties matching: '{message}'\n\n"
