@@ -1,9 +1,69 @@
-properties = [
-    {"id": 1, "address": "123 Main St, Los Angeles, CA", "price": 450000, "bedrooms": 3, "bathrooms": 2, "sqft": 1800, "year_built": 2010, "neighborhood": "Downtown LA", "description": "Beautiful 3-bedroom home in the heart of LA"},
-    {"id": 2, "address": "456 Oak Ave, San Francisco, CA", "price": 850000, "bedrooms": 2, "bathrooms": 1, "sqft": 1200, "year_built": 1995, "neighborhood": "Mission District", "description": "Charming 2-bedroom in trendy SF neighborhood"},
-    {"id": 3, "address": "789 Pine Rd, San Diego, CA", "price": 620000, "bedrooms": 4, "bathrooms": 3, "sqft": 2200, "year_built": 2005, "neighborhood": "La Jolla", "description": "Spacious family home near the beach"},
-    {"id": 4, "address": "321 Elm St, Sacramento, CA", "price": 380000, "bedrooms": 3, "bathrooms": 2, "sqft": 1600, "year_built": 1975, "neighborhood": "Midtown", "description": "Classic Sacramento home in walkable neighborhood"},
-    {"id": 5, "address": "654 Cedar Ln, Fresno, CA", "price": 310000, "bedrooms": 3, "bathrooms": 2, "sqft": 1400, "year_built": 1980, "neighborhood": "Tower District", "description": "Affordable home in growing Fresno area"},
-    {"id": 6, "address": "987 Beach Blvd, San Diego, CA", "price": 195000, "bedrooms": 2, "bathrooms": 1, "sqft": 900, "year_built": 1965, "neighborhood": "Ocean Beach", "description": "Cozy beach cottage near the ocean"},
-    {"id": 7, "address": "147 Valley Rd, Fresno, CA", "price": 180000, "bedrooms": 2, "bathrooms": 1, "sqft": 850, "year_built": 1970, "neighborhood": "Fig Garden", "description": "Charming starter home in quiet neighborhood"}
-]
+# properties.py
+import os
+from dotenv import load_dotenv
+from supabase import create_client
+
+load_dotenv()
+
+# Get Supabase credentials from environment
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment")
+
+# Initialize Supabase client
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def get_all_properties(limit=None):
+    """Get all properties from Supabase"""
+    try:
+        query = supabase.table("properties").select("*")
+        if limit:
+            query = query.limit(limit)
+        response = query.execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching properties: {e}")
+        return []
+
+def filter_properties(budget=None, bedrooms=None, city=None, limit=10):
+    """Filter properties by user preferences"""
+    try:
+        query = supabase.table("properties").select("*")
+        
+        if budget:
+            query = query.lte("price", budget)
+        if bedrooms:
+            query = query.gte("bedrooms", bedrooms)
+        if city:
+            # Case-insensitive search in address and neighborhood
+            query = query.ilike("address", f"%{city}%")
+        
+        query = query.limit(limit)
+        response = query.execute()
+        return response.data
+    except Exception as e:
+        print(f"Error filtering properties: {e}")
+        return []
+
+def get_property_by_id(property_id):
+    """Get a single property by ID"""
+    try:
+        response = supabase.table("properties").select("*").eq("id", property_id).execute()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        print(f"Error fetching property: {e}")
+        return None
+
+def count_properties():
+    """Get total number of properties"""
+    try:
+        response = supabase.table("properties").select("*", count="exact").limit(0).execute()
+        return response.count if hasattr(response, 'count') else 0
+    except Exception as e:
+        print(f"Error counting properties: {e}")
+        return 0
+
+# Load properties on startup (cached)
+properties = get_all_properties()

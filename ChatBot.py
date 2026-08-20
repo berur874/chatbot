@@ -1,70 +1,83 @@
-# ChatBot.py - LIGHTWEIGHT VERSION (No heavy NLP models)
+# ChatBot.py - LIGHTWEIGHT VERSION
 import os
-import re
 import logging
 import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from datetime import datetime
-import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from praser import extract_preferences
-from properties import properties
-from ml_model import ml_model
-from search import simple_search
 
-# Setup
+# Import data & search utility
+from properties import get_all_properties
+from ml_model import ml_model
+from search import search_properties
+
+# Optional: Try importing parser module safely
+try:
+    from parser import extract_preferences
+except ImportError:
+    try:
+        from praser import extract_preferences
+    except ImportError:
+        def extract_preferences(text):
+            return {}
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-app = Flask(__name__)
 
-# ✅ CORS - Allow everything
+app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Global variables
+# Global TF-IDF index states
 vectorizer = None
 property_vectors = None
+properties_cache = []
 models_loaded = False
 
+
 def load_models():
-    """Load or train models - called on first request"""
-    global vectorizer, property_vectors, models_loaded
-    
-    if models_loaded:
-        return True
+    """Fetch properties from Supabase and build TF-IDF search index."""
+    global vectorizer, property_vectors, properties_cache, models_loaded
     
     try:
-        # Create simple text search (NO heavy NLP models!)
-        logger.info("Creating text search index...")
-        vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
-        property_texts = [
-            f"{p['neighborhood']} {p['description']} {p['address']}"
-            for p in properties
-        ]
-        property_vectors = vectorizer.fit_transform(property_texts)
-        logger.info("✅ Search index created")
+        logger.info("Fetching properties from Supabase and indexing...")
+        properties_cache = get_all_properties()
         
+        if not properties_cache:
+            logger.warning("No properties retrieved from database.")
+            return False
+
+        property_texts = [
+            f"{p.get('neighborhood', '')} {p.get('description', '')} {p.get('address', '')}"
+            for p in properties_cache
+        ]
+        
+        vectorizer = TfidfVectorizer(max_features=200, stop_words='english')
+        property_vectors = vectorizer.fit_transform(property_texts)
+        
+        logger.info(f"✅ Search index built with {len(properties_cache)} properties")
         models_loaded = True
         return True
     except Exception as e:
-        logger.error(f"Search index creation failed: {e}")
+        logger.error(f"Failed to load search index: {e}")
         return False
-    
+
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({'status': 'online', 'message': 'Chatbot API is running'})
+    return jsonify({'status': 'online', 'message': 'NyumbaHub Chatbot API is running'})
+
 
 @app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({
         'status': 'healthy',
-        'models_loaded': models_loaded
+        'models_loaded': models_loaded,
+        'property_count': len(properties_cache)
     })
+
+
 @app.route('/api/chat/semantic', methods=['POST', 'OPTIONS'])
 def chat():
-    # Handle preflight
     if request.method == 'OPTIONS':
         response = jsonify({'message': 'OK'})
         response.headers.add('Access-Control-Allow-Origin', '*')
@@ -73,36 +86,38 @@ def chat():
         return response, 200
     
     try:
-        # Load models if needed
-        if not models_loaded:
-            success = load_models()
-            if not success:
-                return jsonify({'error': 'Models failed to load'}), 503
+        if not models_loaded or not properties_cache:
+            if not load_models():
+                return jsonify({'error': 'Failed to initialize search engine or database'}), 503
         
-        data = request.json
+        data = request.json or {}
         message = data.get('message', '').strip()
         
         if not message:
             return jsonify({'error': 'Message required'}), 400
         
-        # Process
+        # Parse preferences
         prefs = extract_preferences(message)
         
-        # Build features for ML model
-        budget = prefs.get('budget') or 500000
+        budget = prefs.get('budget') or 15000000
         bedrooms = prefs.get('bedrooms') or 3
-        
+        city = (prefs.get('city') or '').lower()
+
+        # Kenyan Location Coordinates Map
         city_coords = {
-            'los angeles': (34.05, -118.24),
-            'san francisco': (37.77, -122.42),
-            'san diego': (32.72, -117.16),
-            'sacramento': (38.58, -121.49),
-            'fresno': (36.75, -119.77)
+            'nairobi': (-1.286389, 36.817223),
+            'mombasa': (-4.043477, 39.668206),
+            'kisumu': (-0.091702, 34.767956),
+            'nakuru': (-0.303099, 36.080025),
+            'eldoret': (0.514277, 35.269779),
+            'kiambu': (-1.1714, 36.8356),
+            'naivasha': (-0.7167, 36.4333)
         }
-        lat, lon = city_coords.get(prefs.get('city'), (34.05, -118.24))
-        
+        lat, lon = city_coords.get(city, (-1.286389, 36.817223))
+
+        # ML Features Setup
         features = [
-            budget / 100000.0,
+            budget / 1000000.0,
             25.0,
             (bedrooms + 2) / 3.0,
             bedrooms / 3.0,
@@ -112,25 +127,33 @@ def chat():
             lon
         ]
         
-        # Get price prediction from ml_model
-        prediction = ml_model.predict(features)
-        price = float(np.round(prediction * 100000, -3))
-        
-        matches = simple_search(message, vectorizer, property_vectors, top_k=3)
-        
-        # Format response
+        # Predict price estimate
+        try:
+            prediction = ml_model.predict(features)
+            price = float(np.round(prediction * 1000000, -3))
+        except Exception as ml_err:
+            logger.warning(f"ML Model prediction skipped: {ml_err}")
+            price = None
+
+        # Execute Search
+        matches = search_properties(
+            query=message, 
+            top_k=3
+        )
+
+        # Build Response
         response = f"🔍 Found {len(matches)} properties matching: '{message}'\n\n"
         if price:
-            response += f"📊 Estimated value: ~${price:,.0f}\n\n"
+            response += f"📊 Estimated Value: ~KES {price:,.0f}\n\n"
         
         if matches:
             for i, p in enumerate(matches, 1):
-                response += f"{i}. {p['address']}\n"
-                response += f"   💰 ${p['price']:,} | 🛏️ {p['bedrooms']} bed | 📐 {p['sqft']} sqft\n"
-                response += f"   📝 {p['description']}\n\n"
+                response += f"{i}. {p.get('address', 'N/A')}\n"
+                response += f"   💰 KES {p.get('price', 0):,} | 🛏️ {p.get('bedrooms', 0)} bed | 📐 {p.get('sqft', 0)} sqft\n"
+                response += f"   📝 {p.get('description', '')}\n\n"
         else:
-            response += "😅 No properties found matching your query."
-        
+            response += "😅 No matching properties found for your query."
+
         return jsonify({
             'response': response,
             'query': message,
@@ -139,10 +162,12 @@ def chat():
             'properties': matches,
             'count': len(matches)
         })
-        
+
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Chat execution error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
