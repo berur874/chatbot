@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system utilities & C/C++ compiler tools needed for native extensions
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -11,16 +11,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-# Upgrade core packaging tools before installing requirements
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt
+# Upgrade packaging tools and install requirements
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Pre-download spaCy English model into the image
+RUN python -m spacy download en_core_web_sm
+
 COPY . .
 
-# Create directory for models
 RUN mkdir -p /app/models
 
 EXPOSE 10000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "ChatBot:app"]
+# Note: Using Flask WSGI application format
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "ChatBot:app"]
